@@ -1,12 +1,11 @@
 CREATE TABLE IF NOT EXISTS personal_data (
-    id SERIAL PRIMARY KEY,
-    user_id VARCHAR(50),
-    citizen_id VARCHAR(13) UNIQUE NOT NULL, -- เลขบัตรประชาชน
-    first_name VARCHAR(100),
-    last_name VARCHAR(100),
-    date_of_birth VARCHAR(20),
-    mobile VARCHAR(20),
-    email VARCHAR(100),
-    notification BOOLEAN,
+    user_id VARCHAR(255) PRIMARY KEY,
+    citizen_id VARCHAR(255) UNIQUE,
+    first_name VARCHAR(255),
+    last_name VARCHAR(255),
+    date_of_birth VARCHAR(255),
+    mobile VARCHAR(255),
+    email VARCHAR(255),
+    notification VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
