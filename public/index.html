@@ -5,67 +5,121 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>mToken Authentication | e-Service</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <script src="https://czp.dga.or.th/cportal/sdk/iu/v3/sdk.js"></script>
+
     <style>
         body { background-color: #f8f9fa; display: flex; align-items: center; justify-content: center; height: 100vh; }
-        .card { border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .status-icon { font-size: 3rem; margin-bottom: 1rem; }
+        .card { border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 450px; }
+        .status-icon { font-size: 3.5rem; margin-bottom: 1rem; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-4">
+        <div class="col-12">
             <div class="card p-4 text-center">
+                
                 <div id="loadingSection">
                     <div class="spinner-border text-primary status-icon" role="status"></div>
-                    <h4>กำลังยืนยันตัวตน...</h4>
-                    <p class="text-muted">กรุณารอสักครู่ ระบบกำลังตรวจสอบ mToken</p>
+                    <h4>กำลังตรวจสอบข้อมูล...</h4>
+                    <p class="text-muted">ระบบกำลังค้นหา mToken จาก URL หรือ SDK</p>
                 </div>
 
-                <div id="successSection" style="display: none;">
-                    <div class="status-icon text-success">✅</div>
-                    <h4 class="text-success">ยินดีต้อนรับ</h4>
-                    <h5 id="userName" class="fw-bold mt-3">-</h5>
-                    <p class="text-muted mt-2">เข้าสู่ระบบสำเร็จ</p>
+                <div id="successSection" class="hidden">
+                    <div class="status-icon text-success">🎉</div>
+                    <h3 class="text-success fw-bold">ยืนยันตัวตนสำเร็จ</h3>
+                    <div class="alert alert-success mt-3 text-start">
+                        <small class="text-muted">ชื่อ-นามสกุล:</small><br>
+                        <strong id="userName" class="fs-5">-</strong>
+                    </div>
+                    <p class="text-muted mt-2">บันทึกข้อมูลลงระบบเรียบร้อยแล้ว</p>
+                    <button class="btn btn-primary w-100" onclick="location.reload()">ตกลง</button>
                 </div>
 
-                <div id="errorSection" style="display: none;">
+                <div id="manualInputSection" class="hidden">
+                    <div class="status-icon text-warning">🔑</div>
+                    <h4>ไม่พบ mToken อัตโนมัติ</h4>
+                    <p class="text-muted small">กรุณากรอกข้อมูลเพื่อทดสอบ (Developer Mode)</p>
+                    
+                    <form onsubmit="handleManualSubmit(event)" class="text-start mt-4">
+                        <div class="mb-3">
+                            <label class="form-label">App ID</label>
+                            <input type="text" id="inputAppId" class="form-control" placeholder="ระบุ App ID" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">mToken</label>
+                            <textarea id="inputMToken" class="form-control" rows="3" placeholder="ระบุ mToken ยาวๆ" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">ยืนยันตัวตน</button>
+                    </form>
+                </div>
+
+                <div id="errorSection" class="hidden">
                     <div class="status-icon text-danger">❌</div>
                     <h4 class="text-danger">เกิดข้อผิดพลาด</h4>
-                    <p id="errorMessage" class="text-muted">ไม่สามารถยืนยันตัวตนได้</p>
+                    <p id="errorMessage" class="text-muted">เชื่อมต่อล้มเหลว</p>
                     <button class="btn btn-outline-secondary mt-3" onclick="location.reload()">ลองใหม่อีกครั้ง</button>
                 </div>
+
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    // URL ของ API หลังบ้านเรา (Relative Path เพราะอยู่ Domain เดียวกัน)
     const API_URL = '/test5/auth/login';
 
-    async function processLogin() {
-        // 1. ดึงค่า appId และ mToken (รองรับทั้ง URL Param และ SDK)
-        const params = new URLSearchParams(window.location.search);
-        let appId = params.get('appId');
-        let mToken = params.get('mToken');
+    // เริ่มทำงานเมื่อเปิดเว็บ
+    window.onload = async function() {
+        // รอสักนิดเผื่อ SDK โหลดช้า
+        setTimeout(attemptAutoLogin, 500); 
+    };
 
-        // ถ้าไม่มีใน URL ลองดูว่ามี SDK ไหม (เผื่ออนาคต)
-        if (!appId && window.czpSdk) {
+    async function attemptAutoLogin() {
+        let appId = null;
+        let mToken = null;
+
+        console.log("Checking sources...");
+
+        // --- ช่องทางที่ 1: ดึงจาก URL (Query String) ---
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('appId') && params.has('mToken')) {
+            console.log("Found in URL");
+            appId = params.get('appId');
+            mToken = params.get('mToken');
+        }
+
+        // --- ช่องทางที่ 2: ดึงจาก SDK (ถ้าเปิดในแอปทางรัฐ) ---
+        // อ้างอิง: image_2586a1.png
+        else if (window.czpSdk) {
+            console.log("Found SDK");
             try {
+                // ต้อง try catch เผื่อเรียกนอกแอปแล้วมัน error
                 appId = window.czpSdk.getAppId();
                 mToken = window.czpSdk.getToken();
-            } catch (e) { console.log('SDK not found'); }
+            } catch (e) {
+                console.warn("SDK call failed:", e);
+            }
         }
 
-        // ถ้ายังไม่มีค่าอีก -> แสดง Error
-        if (!appId || !mToken) {
-            showError('ไม่พบข้อมูล appId หรือ mToken ในลิงก์');
-            return;
+        // --- ตัดสินใจ ---
+        if (appId && mToken) {
+            // ถ้าเจอ -> ยิง API เลย
+            await callBackendAPI(appId, mToken);
+        } else {
+            // ถ้าไม่เจอทั้งคู่ -> เปิดหน้าให้กรอกเอง (Manual Mode)
+            console.log("Not found anywhere. Showing manual input.");
+            showSection('manualInputSection');
         }
+    }
 
-        // 2. ส่งค่าไปให้ Backend (Node.js)
+    // ฟังก์ชันยิง API หลังบ้าน (Node.js)
+    async function callBackendAPI(appId, mToken) {
+        showSection('loadingSection'); // โชว์หมุนๆ อีกรอบ
+
         try {
             const response = await fetch(API_URL, {
                 method: 'POST',
@@ -76,32 +130,37 @@
             const result = await response.json();
 
             if (response.ok && result.status === 'success') {
-                // 3. สำเร็จ -> แสดงชื่อ
-                showSuccess(`${result.data.firstName} ${result.data.lastName}`);
+                // สำเร็จ
+                document.getElementById('userName').innerText = 
+                    `${result.data.firstName} ${result.data.lastName}`;
+                showSection('successSection');
             } else {
-                // ไม่สำเร็จ -> แสดง Error จาก Server
-                throw new Error(result.message || 'Verification Failed');
+                // ไม่สำเร็จ (เช่น Token หมดอายุ)
+                throw new Error(result.message || 'Server responded with error');
             }
         } catch (error) {
-            console.error('Login Error:', error);
-            showError('การเชื่อมต่อล้มเหลว หรือ Token หมดอายุ');
+            console.error(error);
+            document.getElementById('errorMessage').innerText = error.message || 'การเชื่อมต่อ Server ล้มเหลว';
+            showSection('errorSection');
         }
     }
 
-    function showSuccess(name) {
-        document.getElementById('loadingSection').style.display = 'none';
-        document.getElementById('successSection').style.display = 'block';
-        document.getElementById('userName').innerText = name;
+    // ฟังก์ชันรับค่าจากการกรอกเอง (Form Submit)
+    function handleManualSubmit(e) {
+        e.preventDefault();
+        const appId = document.getElementById('inputAppId').value;
+        const mToken = document.getElementById('inputMToken').value;
+        
+        callBackendAPI(appId, mToken);
     }
 
-    function showError(msg) {
-        document.getElementById('loadingSection').style.display = 'none';
-        document.getElementById('errorSection').style.display = 'block';
-        document.getElementById('errorMessage').innerText = msg;
+    // ฟังก์ชันสลับหน้าจอ (Helper)
+    function showSection(sectionId) {
+        ['loadingSection', 'successSection', 'manualInputSection', 'errorSection'].forEach(id => {
+            document.getElementById(id).classList.add('hidden');
+        });
+        document.getElementById(sectionId).classList.remove('hidden');
     }
-
-    // เริ่มทำงานทันทีที่เปิดหน้าเว็บ
-    window.onload = processLogin;
 </script>
 
 </body>
