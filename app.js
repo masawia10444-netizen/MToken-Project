@@ -1,42 +1,38 @@
-// app.js - Full Version
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const pool = require('./db');
+const path = require('path'); // ใช้สำหรับจัดการ path ของไฟล์ Frontend
+const pool = require('./db'); // เรียกใช้การเชื่อมต่อ Database จากไฟล์ db.js
 require('dotenv').config();
 
 const app = express();
 
-// Middleware
-app.use(express.json());
-app.use(cors());
+// --- Middleware ---
+app.use(express.json()); // รองรับ JSON Request Body
+app.use(cors());         // อนุญาตให้เรียกข้าม Domain ได้
 
-// สร้าง Router สำหรับ Group path /test5
+// --- 1. การตั้งค่า Frontend (Landing Page) ---
+// บอกให้ Node.js รู้ว่าไฟล์ HTML/CSS อยู่ในโฟลเดอร์ชื่อ 'public'
+// เมื่อเข้า https://.../test5/ ระบบจะไปดึงไฟล์ index.html ในโฟลเดอร์ public มาแสดง
+app.use('/test5', express.static(path.join(__dirname, 'public')));
+
+// --- 2. การตั้งค่า API (Backend Logic) ---
 const router = express.Router();
 
-// ---------------------------------------------------------
-// Route 1: สำหรับเช็คสถานะ Server (GET)
-// เอาไว้แก้ปัญหา "Cannot GET /test5/" เวลาเข้าผ่าน Browser
-// ---------------------------------------------------------
-router.get('/', (req, res) => {
-    res.send('✅ mToken API Service is Running! (Ready to accept POST requests at /auth/login)');
-});
-
-// ---------------------------------------------------------
-// Route 2: Flow หลัก - Login และเก็บข้อมูล (POST)
-// Path จริงจะเป็น: /test5/auth/login
-// ---------------------------------------------------------
+// Route: สำหรับรับค่า Login และดึงข้อมูล (POST /test5/auth/login)
 router.post('/auth/login', async (req, res) => {
-    // 1. รับค่าจาก Frontend
+    // 1. รับค่า appId และ mToken ที่ส่งมาจากหน้า Frontend
     const { appId, mToken } = req.body;
 
-    // Validation เบื้องต้น
+    // เช็คว่าส่งค่ามาครบไหม
     if (!appId || !mToken) {
         return res.status(400).json({ error: 'Missing appId or mToken' });
     }
 
     try {
-        // --- Step 1: เรียก GDX Authentication (GET) ---
+        // ---------------------------------------------------------
+        // Step 1: เรียก GDX Authentication (เพื่อขอ Access Token)
+        // ---------------------------------------------------------
         console.log('Step 1: Requesting GDX Access Token...');
         
         const gdxResponse = await axios.get(process.env.GDX_AUTH_URL, {
@@ -50,16 +46,22 @@ router.post('/auth/login', async (req, res) => {
             }
         });
 
-        const accessToken = gdxResponse.data.Result; // รับ Token
+        const accessToken = gdxResponse.data.Result; // ตัวแปร Result (R ตัวใหญ่ตามสเปก)
+        
+        if (!accessToken) {
+            throw new Error('Failed to retrieve Access Token from GDX');
+        }
         console.log('Access Token Received');
 
-        // --- Step 2: เรียก Deproc เพื่อดึงข้อมูลส่วนบุคคล (POST) ---
+        // ---------------------------------------------------------
+        // Step 2: เรียก Deproc (เพื่อดึงข้อมูลส่วนบุคคล)
+        // ---------------------------------------------------------
         console.log('Step 2: Requesting Personal Data (Deproc)...');
 
         const deprocResponse = await axios.post(
             process.env.DEPROC_API_URL,
             {
-                // **สำคัญ** Body ต้องเป็น PascalCase ตาม Spec DGA
+                // **สำคัญ** Body ต้องเป็น PascalCase (ตัวแรกใหญ่) ตามสเปก DGA
                 AppId: appId,
                 MToken: mToken
             },
@@ -72,13 +74,16 @@ router.post('/auth/login', async (req, res) => {
             }
         );
 
-        const personalData = deprocResponse.data.result;
+        // ดึงข้อมูลส่วนบุคคลจาก result (r เล็ก ตาม Response ของ Deproc)
+        const personalData = deprocResponse.data.result; 
         
         if (!personalData) {
              throw new Error("No data returned from Deproc API");
         }
 
-        // --- Step 3: บันทึกลง Database (PostgreSQL) ---
+        // ---------------------------------------------------------
+        // Step 3: บันทึกข้อมูลลง Database (PostgreSQL)
+        // ---------------------------------------------------------
         console.log('Step 3: Saving to Database...');
         
         const insertQuery = `
@@ -103,7 +108,9 @@ router.post('/auth/login', async (req, res) => {
             personalData.notification
         ]);
 
-        // --- Step 4: ส่ง Response กลับ Frontend ---
+        // ---------------------------------------------------------
+        // Step 4: ส่งผลลัพธ์กลับไปบอกหน้า Frontend
+        // ---------------------------------------------------------
         res.json({
             status: 'success',
             message: 'Login successful and data saved.',
@@ -114,10 +121,11 @@ router.post('/auth/login', async (req, res) => {
         });
 
     } catch (error) {
-        // Log Error อย่างละเอียดเพื่อการ Debug
-        console.error('Error Step:', error.response?.config?.url || 'Internal Processing');
-        console.error('Error Message:', error.message);
-        console.error('Error Response:', error.response?.data);
+        // Log Error อย่างละเอียดเพื่อให้เรากลับมาแก้บั๊กได้ง่าย
+        console.error('--- Login Error ---');
+        console.error('URL:', error.response?.config?.url || 'Internal Process');
+        console.error('Message:', error.message);
+        console.error('Response Data:', error.response?.data);
 
         res.status(500).json({ 
             status: 'error', 
@@ -127,11 +135,13 @@ router.post('/auth/login', async (req, res) => {
     }
 });
 
-// Mount Router ไปที่ path /test5
+// เชื่อม Router เข้ากับ path /test5
 app.use('/test5', router);
 
-// เริ่มต้น Server
+// --- เริ่มต้น Server ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server running on internal port ${PORT}`);
+    console.log(`✅ Server is running on internal port ${PORT}`);
+    console.log(`   - Frontend served at /test5/`);
+    console.log(`   - API endpoint at /test5/auth/login`);
 });
