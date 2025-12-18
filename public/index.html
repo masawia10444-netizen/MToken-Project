@@ -3,100 +3,165 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
-
-    <title>ยืนยันตัวตนสำเร็จ</title>
+    <title>mToken System v5.0</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://czp.dga.or.th/cportal/sdk/iu/v3/sdk.js"></script>
     <style>
-        body { background-color: #f8f9fa; font-family: 'Sarabun', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; padding: 20px; }
-        .card { width: 100%; max-width: 400px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: none; text-align: center; padding: 40px 20px; }
-        .success-icon { font-size: 5rem; margin-bottom: 20px; animation: pop 0.5s ease; }
+        body { background-color: #f4f6f9; padding: 20px; font-family: 'Sarabun', sans-serif; }
+        .version-badge { position: absolute; top: 10px; right: 10px; background: #000; color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 0.8rem; }
+        .card { border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: none; }
+        .status-log { font-family: monospace; font-size: 0.85rem; color: #666; background: #eee; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .debug-box { background: #1e1e1e; color: #00ff00; padding: 15px; font-family: monospace; font-size: 0.8rem; height: 300px; overflow-y: auto; white-space: pre-wrap; border-radius: 5px; }
         .hidden { display: none !important; }
-        .user-box { background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 10px; padding: 15px; margin: 20px 0; }
-        
-        @keyframes pop { 0% { transform: scale(0); } 80% { transform: scale(1.1); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
 
-<div id="loading" class="text-center hidden">
-    <div class="spinner-border text-primary" role="status"></div>
-    <p class="mt-3 text-muted">กำลังตรวจสอบข้อมูล...</p>
-</div>
+<div class="version-badge">VERSION 5.0</div>
 
-<div id="manualInput" class="card hidden">
-    <h5>Developer Mode</h5>
-    <input id="appId" class="form-control mb-3" placeholder="App ID">
-    <textarea id="mToken" class="form-control mb-3" rows="3" placeholder="mToken"></textarea>
-    <button onclick="doLogin()" class="btn btn-primary w-100">ยืนยันตัวตน</button>
-</div>
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card p-4">
+                <h4 class="text-center mb-3 text-primary fw-bold">ระบบยืนยันตัวตน (mToken)</h4>
+                
+                <div class="status-log" id="searchLog">
+                    Checking Source...
+                </div>
 
-<div id="successCard" class="card hidden">
-    <div class="success-icon">🎉</div>
-    <h3 class="text-success fw-bold">ยืนยันตัวตนสำเร็จ</h3>
-    
-    <div class="user-box">
-        <small class="text-muted">ชื่อ-นามสกุล:</small><br>
-        <h4 id="userName" class="fw-bold mb-0 text-dark">-</h4>
+                <div id="manualForm" class="hidden">
+                    <div class="alert alert-warning border-0 d-flex align-items-center">
+                        <span class="me-2">⚠️</span>
+                        <small>ไม่พบ mToken จาก URL หรือ SDK (เข้าสู่โหมด Developer)</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="fw-bold form-label">App ID</label>
+                        <input type="text" id="appId" class="form-control" placeholder="ระบุ App ID">
+                    </div>
+                    <div class="mb-3">
+                        <label class="fw-bold form-label">mToken</label>
+                        <textarea id="mToken" class="form-control" rows="3" placeholder="ระบุ mToken..."></textarea>
+                    </div>
+                    <button onclick="startLogin()" class="btn btn-primary w-100">ทดสอบยืนยันตัวตน</button>
+                </div>
+
+                <div id="loadingScreen" class="hidden text-center py-4">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <h5>กำลังเชื่อมต่อระบบ...</h5>
+                    <p class="text-muted small">Sending data to Backend API</p>
+                </div>
+
+                <div id="resultScreen" class="hidden">
+                    <h5 class="border-bottom pb-2">ผลการทำงาน:</h5>
+                    <div id="consoleBox" class="debug-box">Waiting...</div>
+                    <button onclick="location.reload()" class="btn btn-secondary w-100 mt-3">เริ่มใหม่</button>
+                </div>
+
+            </div>
+        </div>
     </div>
-
-    <p class="text-muted small">บันทึกข้อมูลลงระบบเรียบร้อยแล้ว</p>
-    
-    <button onclick="location.reload()" class="btn btn-primary w-100 rounded-pill py-2 fw-bold">ตกลง</button>
 </div>
 
 <script>
-    window.onload = async () => {
-        const params = new URLSearchParams(window.location.search);
-        let appId = params.get('appId');
-        let mToken = params.get('mToken');
+    // เริ่มทำงานทันที
+    window.onload = async function() {
+        await checkSources();
+    }
 
-        if(!appId && window.czpSdk) {
-            try { appId = window.czpSdk.getAppId(); mToken = window.czpSdk.getToken(); } catch(e){}
+    async function checkSources() {
+        const log = document.getElementById('searchLog');
+        let foundAppId = null;
+        let foundMToken = null;
+
+        // 1. เช็ค URL
+        log.innerHTML = "🔍 1. Checking URL Parameters... ";
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('appId') && params.has('mToken')) {
+            foundAppId = params.get('appId');
+            foundMToken = params.get('mToken');
+            log.innerHTML += "<span class='text-success'>FOUND ✅</span>";
+        } else {
+            log.innerHTML += "<span class='text-danger'>NOT FOUND ❌</span><br>";
         }
 
-        if(appId && mToken) {
-            document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('appId').value = appId;
-            document.getElementById('mToken').value = mToken;
-            doLogin();
+        // 2. เช็ค SDK (ถ้า URL ไม่เจอ)
+        if (!foundAppId) {
+            log.innerHTML += "🔍 2. Checking 'TangRat' SDK... ";
+            if (window.czpSdk) {
+                try {
+                    foundAppId = window.czpSdk.getAppId();
+                    foundMToken = window.czpSdk.getToken();
+                    if(foundAppId) log.innerHTML += "<span class='text-success'>FOUND ✅</span>";
+                    else log.innerHTML += "<span class='text-danger'>EMPTY ❌</span>";
+                } catch(e) {
+                    log.innerHTML += "<span class='text-danger'>ERROR ❌</span>";
+                }
+            } else {
+                log.innerHTML += "<span class='text-danger'>NOT DETECTED ❌</span> (Not inside App)";
+            }
+        }
+
+        // ตัดสินใจ
+        if (foundAppId && foundMToken) {
+            log.innerHTML += "<br>🚀 Auto-Login Starting...";
+            // เติมค่าลง Form แล้วกดส่งเลย
+            document.getElementById('appId').value = foundAppId;
+            document.getElementById('mToken').value = foundMToken;
+            startLogin(); 
         } else {
-            document.getElementById('manualInput').classList.remove('hidden');
+            // ถ้าไม่เจอเลย -> เปิด Manual Form
+            document.getElementById('manualForm').classList.remove('hidden');
         }
     }
 
-    async function doLogin() {
+    async function startLogin() {
         const appId = document.getElementById('appId').value;
         const mToken = document.getElementById('mToken').value;
+        const consoleBox = document.getElementById('consoleBox');
 
-        document.getElementById('manualInput').classList.add('hidden');
-        document.getElementById('loading').classList.remove('hidden');
+        // สลับหน้าจอ
+        document.getElementById('manualForm').classList.add('hidden');
+        document.getElementById('searchLog').classList.add('hidden');
+        document.getElementById('loadingScreen').classList.remove('hidden');
 
         try {
-            const res = await fetch('/test5/auth/login', {
+            const response = await fetch('/test5/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ appId, mToken })
             });
-            const result = await res.json();
+            
+            const result = await response.json();
+            
+            document.getElementById('loadingScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
 
-            document.getElementById('loading').classList.add('hidden');
-
-            if(result.status === 'success') {
-                document.getElementById('successCard').classList.remove('hidden');
-                document.getElementById('userName').innerText = `${result.data.firstName} ${result.data.lastName}`;
-            } else {
-                alert('Login Failed: ' + result.message);
-                // ถ้าพลาด ให้กลับหน้าเดิม
-                document.getElementById('manualInput').classList.remove('hidden');
+            let logText = `STATUS: ${response.status}\n`;
+            logText += `==============================\n`;
+            
+            if (result.debug) {
+                logText += `[STEP 1] GDX Token: ${result.debug.step1_gdx_token ? '✅ OK' : '❌ FAIL'}\n`;
+                if(result.debug.step1_gdx_token) logText += `   > ${result.debug.step1_gdx_token.substring(0, 20)}...\n`;
+                
+                logText += `[STEP 2] Deproc Data: ${result.debug.step2_deproc_data ? '✅ OK' : '❌ FAIL'}\n`;
+                if(result.debug.step2_deproc_data) logText += `   > ${JSON.stringify(result.debug.step2_deproc_data).substring(0, 50)}...\n`;
+                
+                logText += `[STEP 3] DB Saved: ${result.debug.step3_db_saved ? '✅ YES' : '❌ NO'}\n`;
             }
-        } catch(e) {
-            alert('Error: ' + e.message);
-            document.getElementById('manualInput').classList.remove('hidden');
+
+            if (result.status === 'success') {
+                logText += `\n🟢 SUCCESS! Welcome: ${result.data.firstName} ${result.data.lastName}`;
+            } else {
+                logText += `\n🔴 FAILED: ${result.message}\n`;
+                if(result.api_response) logText += `API ERROR: ${JSON.stringify(result.api_response, null, 2)}`;
+            }
+
+            consoleBox.innerText = logText;
+
+        } catch (e) {
+            document.getElementById('loadingScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
+            consoleBox.innerText = "❌ CONNECTION ERROR:\n" + e.message;
         }
     }
 </script>
