@@ -1,4 +1,3 @@
-// app.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -9,69 +8,73 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ตั้งค่า Router ให้รองรับ Path /test5 ตามโจทย์
+// Router สำหรับ path /test5
 const router = express.Router();
 
-// Route รับค่า AppId และ MToken จาก Frontend
 router.post('/auth/login', async (req, res) => {
-    // 1. รับค่าจาก Frontend (Landing Page)
-    const { appId, mToken } = req.body; // รับเป็น camelCase จากหน้าบ้าน
+    // รับค่าจากหน้าบ้าน (Frontend อาจส่งมาเป็นตัวเล็ก)
+    const { appId, mToken } = req.body;
 
     if (!appId || !mToken) {
         return res.status(400).json({ error: 'Missing appId or mToken' });
     }
 
     try {
-        // --- [Step 1] เรียก API Authentication (GET) ---
-        // อ้างอิงภาพ: image_2586ff.png
+        // ---------------------------------------------------------
+        // Step 1: เรียก GDX Authentication (GET)
+        // อ้างอิงรูป: image_2586ff.png
+        // ---------------------------------------------------------
         console.log('Step 1: Requesting GDX Access Token...');
         
-        const gdxUrl = process.env.GDX_AUTH_URL;
-        
-        const gdxResponse = await axios.get(gdxUrl, {
+        const gdxResponse = await axios.get(process.env.GDX_AUTH_URL, {
             params: {
-                ConsumerSecret: process.env.CONSUMER_SECRET,
-                AgentID: process.env.AGENT_ID
+                ConsumerSecret: process.env.CONSUMER_SECRET, // ตามรูป
+                AgentID: process.env.AGENT_ID               // ตามรูป (ตัว D ใหญ่)
             },
             headers: {
-                'Consumer-Key': process.env.CONSUMER_KEY,
+                'Consumer-Key': process.env.CONSUMER_KEY,   // ตามรูป (มีขีดกลาง)
                 'Content-Type': 'application/json'
             }
         });
 
-        const accessToken = gdxResponse.data.Result; // ได้ Token กลับมา
-        console.log('Access Token Received');
+        const accessToken = gdxResponse.data.Result; // ตามรูป image_2586ff Response คือ "Result"
+        console.log('Access Token Received:', accessToken ? 'Yes' : 'No');
 
-        // --- [Step 2] เรียก API Deproc (POST) ---
-        // อ้างอิงภาพ: image_25837b.png และ image_258662.png
+        // ---------------------------------------------------------
+        // Step 2: เรียก Deproc เพื่อเอาข้อมูลส่วนตัว (POST)
+        // อ้างอิงรูป: image_25837b.png
+        // ---------------------------------------------------------
         console.log('Step 2: Requesting Personal Data (Deproc)...');
 
         const deprocResponse = await axios.post(
             process.env.DEPROC_API_URL,
             {
-                // **สำคัญ** Body ต้องเป็น PascalCase ตาม Spec ในรูป
-                AppId: appId,
-                MToken: mToken
+                // *** สำคัญ: Body ต้องเป็น PascalCase ตามรูป ***
+                AppId: appId,   
+                MToken: mToken  
             },
             {
                 headers: {
                     'Consumer-Key': process.env.CONSUMER_KEY,
                     'Content-Type': 'application/json',
-                    'Token': accessToken // Header ชื่อ "Token"
+                    'Token': accessToken // ตามรูป Header ชื่อ "Token"
                 }
             }
         );
 
-        // ดึงข้อมูลส่วนบุคคลจาก Response (อยู่ใน object "result")
-        const personalData = deprocResponse.data.result;
-        
+        // ดึงข้อมูลจาก result (ตามรูป image_25837b)
+        const personalData = deprocResponse.data.result; 
+
         if (!personalData) {
              throw new Error("No data returned from Deproc API");
         }
 
-        // --- [Step 3] เก็บข้อมูลลง PostgreSQL ---
+        // ---------------------------------------------------------
+        // Step 3: บันทึกลง Database (PostgreSQL)
+        // ---------------------------------------------------------
         console.log('Step 3: Saving to Database...');
         
+        // แปลง citizenId เป็น user_id หรือตาม logic ที่ต้องการ
         const insertQuery = `
             INSERT INTO personal_data 
             (user_id, citizen_id, first_name, last_name, date_of_birth, mobile, email, notification)
@@ -84,20 +87,22 @@ router.post('/auth/login', async (req, res) => {
         `;
 
         await pool.query(insertQuery, [
-            personalData.userId,
-            personalData.citizenId,
-            personalData.firstName,
-            personalData.lastName,
-            personalData.dateOfBirthString,
-            personalData.mobile,
-            personalData.email,
-            personalData.notification
+            personalData.userId,           // จาก API
+            personalData.citizenId,        // จาก API
+            personalData.firstName,        // จาก API
+            personalData.lastName,         // จาก API
+            personalData.dateOfBirthString,// จาก API
+            personalData.mobile,           // จาก API
+            personalData.email,            // จาก API
+            personalData.notification      // จาก API
         ]);
 
-        // --- [Step 4] Response กลับไป Frontend ---
+        // ---------------------------------------------------------
+        // Step 4: ส่ง Response กลับ Frontend
+        // ---------------------------------------------------------
         res.json({
             status: 'success',
-            message: 'Data retrieved and saved successfully',
+            message: 'Login successful',
             data: {
                 firstName: personalData.firstName,
                 lastName: personalData.lastName
@@ -105,19 +110,20 @@ router.post('/auth/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error:', error.response?.data || error.message);
+        console.error('Error Step:', error.response?.config?.url || 'Internal Code');
+        console.error('Error Details:', error.response?.data || error.message);
+        
         res.status(500).json({ 
             status: 'error', 
-            message: 'Failed to process mToken login',
+            message: 'Process failed',
             detail: error.response?.data || error.message 
         });
     }
 });
 
-// Mount router ไปที่ /test5
 app.use('/test5', router);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server running on internal port ${PORT}, mounted at /test5`);
+    console.log(`Server running on internal port ${PORT}`);
 });
