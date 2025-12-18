@@ -1,4 +1,6 @@
-// app.js - Final Debug Version
+// ==========================================
+// app.js (Full Debug Version)
+// ==========================================
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -12,7 +14,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ตั้งค่า Frontend (ให้เปิดไฟล์ index.html จากโฟลเดอร์ public)
+// ตั้งค่า Frontend: ให้เปิดไฟล์ index.html จากโฟลเดอร์ public
+// เมื่อเข้า https://.../test5/ ระบบจะวิ่งไปหา index.html
 app.use('/test5', express.static(path.join(__dirname, 'public')));
 
 const router = express.Router();
@@ -21,21 +24,21 @@ const router = express.Router();
 router.post('/auth/login', async (req, res) => {
     const { appId, mToken } = req.body;
     
-    // ตัวแปรสำหรับเก็บข้อมูลเพื่อส่งกลับไป Debug หน้าบ้าน
+    // สร้างตัวแปรเก็บ Log ไว้ส่งกลับไปหน้าเว็บ
     let debugInfo = {
-        step1_gdx_token: null,
-        step2_deproc_data: null,
-        step3_db_saved: false
+        step1_gdx_token: null,     // จะเก็บ Token ที่ได้จาก GDX
+        step2_deproc_data: null,   // จะเก็บข้อมูลดิบจาก Deproc
+        step3_db_saved: false      // จะบอกว่าลง DB สำเร็จไหม
     };
 
-    // 1. Validation
+    // 1. ตรวจสอบค่าที่ส่งมา
     if (!appId || !mToken) {
         return res.status(400).json({ error: 'Missing appId or mToken' });
     }
 
     try {
         // ---------------------------------------------------------
-        // Step 1: เรียก GDX Authentication (หา Token)
+        // Step 1: เรียก GDX Authentication (เพื่อขอ Access Token)
         // ---------------------------------------------------------
         console.log('🔹 Step 1: Requesting GDX Access Token...');
         
@@ -50,39 +53,40 @@ router.post('/auth/login', async (req, res) => {
             }
         });
 
-        // เก็บ Token ไว้ส่งกลับไปดูหน้าบ้าน
+        // เก็บ Token ไว้ใน debugInfo
         debugInfo.step1_gdx_token = gdxResponse.data.Result;
         console.log('✅ Token Received:', debugInfo.step1_gdx_token ? 'Yes' : 'No');
 
         if (!debugInfo.step1_gdx_token) {
-            throw new Error('GDX returned empty token');
+            throw new Error('GDX returned empty token (Result is null)');
         }
 
         // ---------------------------------------------------------
-        // Step 2: เรียก Deproc (ดึงข้อมูลส่วนบุคคล)
+        // Step 2: เรียก Deproc (เพื่อดึงข้อมูลส่วนบุคคล)
         // ---------------------------------------------------------
         console.log('🔹 Step 2: Requesting Personal Data (Deproc)...');
 
         const deprocResponse = await axios.post(
             process.env.DEPROC_API_URL,
             {
-                AppId: appId,   // PascalCase ตาม Spec
-                MToken: mToken  // PascalCase ตาม Spec
+                AppId: appId,   // ส่งตัวใหญ่ PascalCase ตามสเปก
+                MToken: mToken  // ส่งตัวใหญ่ PascalCase ตามสเปก
             },
             {
                 headers: {
                     'Consumer-Key': process.env.CONSUMER_KEY,
                     'Content-Type': 'application/json',
-                    'Token': debugInfo.step1_gdx_token // ส่ง Token ที่ได้จาก Step 1
+                    'Token': debugInfo.step1_gdx_token // เอา Token จาก Step 1 มาใส่
                 }
             }
         );
 
-        debugInfo.step2_deproc_data = deprocResponse.data; // เก็บ Response ดิบๆ ไว้ดู
+        // เก็บข้อมูลดิบไว้ดู (เผื่อ field ชื่อไม่ตรง)
+        debugInfo.step2_deproc_data = deprocResponse.data;
 
         const personalData = deprocResponse.data.result;
         if (!personalData) {
-             throw new Error("Deproc API executed but returned no 'result' object");
+             throw new Error("Deproc executed but returned no 'result' object");
         }
 
         // ---------------------------------------------------------
@@ -120,7 +124,7 @@ router.post('/auth/login', async (req, res) => {
         res.json({
             status: 'success',
             message: 'Login successful',
-            debug: debugInfo, // <--- ส่งข้อมูล Debug กลับไปโชว์หน้าเว็บ
+            debug: debugInfo, // <--- ส่งข้อมูล Debug ทั้งหมดกลับไปโชว์
             data: {
                 firstName: personalData.firstName,
                 lastName: personalData.lastName
@@ -130,18 +134,20 @@ router.post('/auth/login', async (req, res) => {
     } catch (error) {
         console.error('❌ Error Occurred:', error.message);
         
-        // ส่ง Error กลับไป พร้อมข้อมูล Debug เท่าที่ทำได้
+        // ส่ง Error กลับไป พร้อมข้อมูล Debug เท่าที่มี (จะได้รู้ว่าตายตรงไหน)
         res.status(500).json({ 
             status: 'error', 
             message: error.message,
-            debug: debugInfo, // <--- ส่งข้อมูล Debug กลับไปโชว์หน้าเว็บ (จะได้รู้ว่าตายตรงไหน)
-            api_response: error.response?.data || 'No response data'
+            debug: debugInfo, 
+            api_response: error.response?.data || 'No response data from API'
         });
     }
 });
 
+// เชื่อม Router
 app.use('/test5', router);
 
+// เริ่ม Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
