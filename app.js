@@ -1,46 +1,47 @@
 // ==========================================
-// app.js (Full Debug Version)
+// app.js (v5.0 Final Integration)
 // ==========================================
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
-const pool = require('./db'); // ต้องมีไฟล์ db.js อยู่ที่เดียวกัน
+const pool = require('./db');
 require('dotenv').config();
 
 const app = express();
-
-// Middleware
 app.use(express.json());
 app.use(cors());
 
-// ตั้งค่า Frontend: ให้เปิดไฟล์ index.html จากโฟลเดอร์ public
-// เมื่อเข้า https://.../test5/ ระบบจะวิ่งไปหา index.html
+// ตั้งค่า Frontend
 app.use('/test5', express.static(path.join(__dirname, 'public')));
 
 const router = express.Router();
 
-// --- API หลัก: Login & Debug ---
+// API ตรวจสอบเวอร์ชัน (เผื่อไว้ยิงเช็ค)
+router.get('/version', (req, res) => res.send('API v5.0 (Integration Ready)'));
+
 router.post('/auth/login', async (req, res) => {
-    const { appId, mToken } = req.body;
+    // รับค่าและตัดช่องว่างหัวท้ายออก (กันเหนียว)
+    let { appId, mToken } = req.body;
+    if(appId) appId = appId.toString().trim();
+    if(mToken) mToken = mToken.toString().trim();
     
-    // สร้างตัวแปรเก็บ Log ไว้ส่งกลับไปหน้าเว็บ
+    // Debug Object ที่จะส่งกลับไปหน้าบ้าน
     let debugInfo = {
-        step1_gdx_token: null,     // จะเก็บ Token ที่ได้จาก GDX
-        step2_deproc_data: null,   // จะเก็บข้อมูลดิบจาก Deproc
-        step3_db_saved: false      // จะบอกว่าลง DB สำเร็จไหม
+        version: "5.0",
+        received_params: { appId, mToken_length: mToken ? mToken.length : 0 }, // เช็คว่ารับค่ามาจริงไหม
+        step1_gdx_token: null,
+        step2_deproc_data: null,
+        step3_db_saved: false
     };
 
-    // 1. ตรวจสอบค่าที่ส่งมา
     if (!appId || !mToken) {
-        return res.status(400).json({ error: 'Missing appId or mToken' });
+        return res.status(400).json({ error: 'Missing appId or mToken', debug: debugInfo });
     }
 
     try {
-        // ---------------------------------------------------------
-        // Step 1: เรียก GDX Authentication (เพื่อขอ Access Token)
-        // ---------------------------------------------------------
-        console.log('🔹 Step 1: Requesting GDX Access Token...');
+        // --- Step 1: GDX Authentication ---
+        console.log('[v5.0] Step 1: Requesting GDX...');
         
         const gdxResponse = await axios.get(process.env.GDX_AUTH_URL, {
             params: {
@@ -53,46 +54,34 @@ router.post('/auth/login', async (req, res) => {
             }
         });
 
-        // เก็บ Token ไว้ใน debugInfo
         debugInfo.step1_gdx_token = gdxResponse.data.Result;
-        console.log('✅ Token Received:', debugInfo.step1_gdx_token ? 'Yes' : 'No');
+        
+        if (!debugInfo.step1_gdx_token) throw new Error('GDX Token is NULL');
+        console.log('✅ GDX Token OK');
 
-        if (!debugInfo.step1_gdx_token) {
-            throw new Error('GDX returned empty token (Result is null)');
-        }
-
-        // ---------------------------------------------------------
-        // Step 2: เรียก Deproc (เพื่อดึงข้อมูลส่วนบุคคล)
-        // ---------------------------------------------------------
-        console.log('🔹 Step 2: Requesting Personal Data (Deproc)...');
-
+        // --- Step 2: Deproc (Personal Data) ---
+        console.log('[v5.0] Step 2: Requesting Deproc...');
+        
         const deprocResponse = await axios.post(
             process.env.DEPROC_API_URL,
-            {
-                AppId: appId,   // ส่งตัวใหญ่ PascalCase ตามสเปก
-                MToken: mToken  // ส่งตัวใหญ่ PascalCase ตามสเปก
-            },
+            { AppId: appId, MToken: mToken }, // PascalCase ตามสเปก
             {
                 headers: {
                     'Consumer-Key': process.env.CONSUMER_KEY,
                     'Content-Type': 'application/json',
-                    'Token': debugInfo.step1_gdx_token // เอา Token จาก Step 1 มาใส่
+                    'Token': debugInfo.step1_gdx_token
                 }
             }
         );
 
-        // เก็บข้อมูลดิบไว้ดู (เผื่อ field ชื่อไม่ตรง)
         debugInfo.step2_deproc_data = deprocResponse.data;
 
-        const personalData = deprocResponse.data.result;
-        if (!personalData) {
-             throw new Error("Deproc executed but returned no 'result' object");
-        }
+        const personalData = deprocResponse.data.result; // r เล็ก
+        if (!personalData) throw new Error("Deproc result is NULL");
+        console.log('✅ Deproc Data OK');
 
-        // ---------------------------------------------------------
-        // Step 3: บันทึกลง Database
-        // ---------------------------------------------------------
-        console.log('🔹 Step 3: Saving to Database...');
+        // --- Step 3: Database Save ---
+        console.log('[v5.0] Step 3: Saving to DB...');
         
         const insertQuery = `
             INSERT INTO personal_data 
@@ -118,37 +107,27 @@ router.post('/auth/login', async (req, res) => {
         
         debugInfo.step3_db_saved = true;
 
-        // ---------------------------------------------------------
-        // Step 4: ส่งผลลัพธ์กลับ (Success)
-        // ---------------------------------------------------------
         res.json({
             status: 'success',
             message: 'Login successful',
-            debug: debugInfo, // <--- ส่งข้อมูล Debug ทั้งหมดกลับไปโชว์
-            data: {
-                firstName: personalData.firstName,
-                lastName: personalData.lastName
-            }
+            debug: debugInfo,
+            data: personalData
         });
 
     } catch (error) {
-        console.error('❌ Error Occurred:', error.message);
-        
-        // ส่ง Error กลับไป พร้อมข้อมูล Debug เท่าที่มี (จะได้รู้ว่าตายตรงไหน)
+        console.error('[v5.0] Error:', error.message);
         res.status(500).json({ 
             status: 'error', 
             message: error.message,
-            debug: debugInfo, 
-            api_response: error.response?.data || 'No response data from API'
+            debug: debugInfo,
+            api_response: error.response?.data
         });
     }
 });
 
-// เชื่อม Router
 app.use('/test5', router);
 
-// เริ่ม Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 Server v5.0 running on port ${PORT}`);
 });
