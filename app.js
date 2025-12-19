@@ -1,5 +1,6 @@
 // ==========================================
-// app.js (v12.0 Full Option - Login + Notify)
+// app.js (v13.0 Final Reference)
+// รวม Login (Auto-Table) + Notification (Based on test3)
 // ==========================================
 const express = require('express');
 const axios = require('axios');
@@ -12,20 +13,28 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Serve Frontend
 app.use('/test5', express.static(path.join(__dirname, 'public')));
 
-// --- Helper Function: ขอ GDX Token (ใช้ซ้ำได้) ---
+// --- Helper: ขอ GDX Token ใหม่ (ใช้ได้ทั้ง Login และ Notify) ---
 async function getGdxToken() {
-    const res = await axios.get(process.env.GDX_AUTH_URL, {
-        params: { ConsumerSecret: process.env.CONSUMER_SECRET, AgentID: process.env.AGENT_ID },
-        headers: { 'Consumer-Key': process.env.CONSUMER_KEY, 'Content-Type': 'application/json' }
-    });
-    return res.data.Result;
+    try {
+        const res = await axios.get(process.env.GDX_AUTH_URL, {
+            params: { ConsumerSecret: process.env.CONSUMER_SECRET, AgentID: process.env.AGENT_ID },
+            headers: { 'Consumer-Key': process.env.CONSUMER_KEY, 'Content-Type': 'application/json' }
+        });
+        return res.data.Result;
+    } catch (e) {
+        console.error("❌ Failed to get GDX Token:", e.message);
+        throw new Error("Cannot get GDX Token");
+    }
 }
 
 const router = express.Router();
 
-// 1️⃣ API Login (เหมือนเดิม แต่ Clean ขึ้น)
+// ------------------------------------------------------------------
+// 1️⃣ API LOGIN (Logic เดิมที่เสถียรแล้ว)
+// ------------------------------------------------------------------
 router.post('/auth/login', async (req, res) => {
     const { appId, mToken } = req.body;
     let debugInfo = { step1: null, step2: null, step3: false };
@@ -33,11 +42,11 @@ router.post('/auth/login', async (req, res) => {
     if (!appId || !mToken) return res.status(400).json({ error: 'Missing Data' });
 
     try {
-        console.log('🔹 Login Step 1: Getting Token...');
+        console.log('🔹 Login Step 1: Requesting Token...');
         const token = await getGdxToken();
         debugInfo.step1 = token;
 
-        console.log('🔹 Login Step 2: Getting Profile...');
+        console.log('🔹 Login Step 2: Requesting Profile...');
         const deprocRes = await axios.post(process.env.DEPROC_API_URL, 
             { AppId: appId, MToken: mToken },
             { headers: { 'Consumer-Key': process.env.CONSUMER_KEY, 'Token': token, 'Content-Type': 'application/json' } }
@@ -45,10 +54,10 @@ router.post('/auth/login', async (req, res) => {
         debugInfo.step2 = deprocRes.data;
         
         const pData = deprocRes.data.result;
-        if (!pData) throw new Error("mToken Expired or Invalid");
+        if (!pData) throw new Error("Deproc returned NULL (Token Expired)");
 
         console.log('🔹 Login Step 3: Saving DB...');
-        // Auto-Create Table
+        // Auto-Create Table Logic
         await pool.query(`
             CREATE TABLE IF NOT EXISTS personal_data (
                 user_id VARCHAR(255) PRIMARY KEY,
@@ -79,7 +88,8 @@ router.post('/auth/login', async (req, res) => {
             data: { 
                 firstName: pData.firstName, 
                 lastName: pData.lastName,
-                citizenId: pData.citizenId // ส่งกลับไปเพื่อใช้ยิง Notify ต่อ
+                userId: pData.userId, // ส่ง userId กลับไป เพื่อใช้ยิง Notify
+                appId: appId
             }
         });
 
@@ -89,44 +99,65 @@ router.post('/auth/login', async (req, res) => {
     }
 });
 
-// 2️⃣ API Notification (ของใหม่!)
+// ------------------------------------------------------------------
+// 2️⃣ API NOTIFICATION (อ้างอิงจากโค้ด test3)
+// ------------------------------------------------------------------
 router.post('/notify/send', async (req, res) => {
-    const { citizenId, message } = req.body;
+    console.log("🚀 [START] /notify/send");
     
-    if (!citizenId) return res.status(400).json({ error: 'Missing Citizen ID' });
+    // รับค่าจากหน้าบ้าน
+    const { appId, userId, message } = req.body;
+
+    if (!appId || !userId) {
+        return res.status(400).json({ success: false, message: "Missing appId or userId" });
+    }
 
     try {
-        console.log(`🔹 Sending Notification to: ${citizenId}`);
-        const token = await getGdxToken(); // ขอ Token ใหม่สดๆ
+        // 1. ขอ Token ใหม่สดๆ (ไม่ต้องรอรับจาก frontend)
+        const token = await getGdxToken();
 
-        // Payload สำหรับ Notification (ปรับตาม Spec ของทางรัฐ)
-        // ปกติต้องส่ง CitizenID และ ข้อความ
-        const notifyBody = {
-            CitizenId: citizenId,
-            Messages: [{
-                TemplateId: 1, // หรือใส่ ID ตามที่ตกลงกับทางรัฐ
-                Topic: "แจ้งเตือนทดสอบ",
-                Detail: message || "ทดสอบระบบ mToken สำเร็จ!"
-            }]
+        // 2. เตรียม Header
+        const headers = {
+            "Consumer-Key": process.env.CONSUMER_KEY,
+            "Content-Type": "application/json",
+            "Token": token
         };
 
-        const notifyRes = await axios.post(process.env.NOTIFICATION_API_URL, 
-            notifyBody,
-            { headers: { 'Consumer-Key': process.env.CONSUMER_KEY, 'Token': token, 'Content-Type': 'application/json' } }
-        );
+        // 3. เตรียม Body (ตามแบบฉบับ test3 เป๊ะๆ)
+        const body = {
+            appId: appId,
+            data: [
+                {
+                    message: message || "ทดสอบแจ้งเตือนจาก test5",
+                    userId: userId
+                }
+            ],
+            sendDateTime: null
+        };
 
-        console.log('✅ Notify Result:', notifyRes.data);
-        res.json({ status: 'success', data: notifyRes.data });
+        console.log("🌐 Calling DGA Notify API...");
+        console.log("📦 Body:", JSON.stringify(body));
 
-    } catch (error) {
-        console.error('❌ Notify Error:', error.message);
-        res.status(500).json({ 
-            status: 'error', 
-            message: error.message,
-            detail: error.response?.data 
+        // 4. ยิง API
+        const response = await axios.post(process.env.NOTIFICATION_API_URL, body, { headers });
+
+        console.log("✅ DGA Response:", response.data);
+
+        res.json({
+            success: true,
+            message: "ส่ง Notification สำเร็จ",
+            result: response.data
+        });
+
+    } catch (err) {
+        console.error("💥 Notify Error:", err.response?.data || err.message);
+        res.status(500).json({
+            success: false,
+            message: "เกิดข้อผิดพลาดในการส่ง Notification",
+            error: err.response?.data || err.message
         });
     }
 });
 
 app.use('/test5', router);
-app.listen(process.env.PORT || 3000, () => console.log(`🚀 v12.0 Full Option Running...`));
+app.listen(process.env.PORT || 3000, () => console.log(`🚀 v13.0 Final Reference Running...`));
